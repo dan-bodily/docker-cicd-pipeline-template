@@ -1,0 +1,86 @@
+---
+# rollback.yml — Ansible playbook for application rollback
+# Triggered automatically by Jenkins on pipeline failure
+# or manually by an operator passing a specific rollback_tag
+#
+# DB ENGINE NOTE: If you change the database engine from PostgreSQL
+# update the vault_db_port default value below to match your engine:
+#   MySQL/MariaDB  → default port 3306
+#   MSSQL          → default port 1433
+#   Oracle         → default port 1521
+# Also update docker-compose.yml, docker-compose.env.template,
+# deploy.yml, and smoke-test.sh
+
+- name: Rollback application to previous build
+  hosts: docker_hosts
+  become: yes
+
+  vars:
+    deploy_dir: "/opt/company/app"
+    image_name: "registry.company.internal/portal"
+    # rollback_tag passed in from Jenkins as an extra variable
+    # Automatically set to BUILD_NUMBER - 1 on pipeline failure
+    # Can be manually specified for targeted rollbacks
+    rollback_tag: "{{ rollback_tag }}"
+
+  tasks:
+
+    - name: Authenticate with HashiCorp Vault
+      # AppRole auth — credentials stored in Jenkins, never on disk
+      community.hashi_vault.vault_login:
+        url: "https://vault.company.internal"
+        auth_method: approle
+        role_id: "{{ vault_role_id }}"
+        secret_id: "{{ vault_secret_id }}"
+      register: vault_login
+
+    - name: Pull database credentials from Vault
+      # Update secret path to match your Vault KV structure
+      # Update variable names if switching DB engine (see note above)
+      community.hashi_vault.vault_kv2_get:
+        url: "https://vault.company.internal"
+        path: "company/prod/app/db"
+        auth_method: token
+        token: "{{ vault_login.login.auth.client_token }}"
+      register: vault_secrets
+
+    - name: Populate .env file with rollback image tag
+      # Writes secrets to .env with rollback image tag
+      # Update variable names below if switching DB engine (see note above)
+      template:
+        src: ../docker-compose.env.template
+        dest: "{{ deploy_dir }}/.env"
+        owner: root
+        group: root
+        mode: '0600'
+      vars:
+        vault_db_host:     "{{ vault_secrets.data.db_host }}"
+        # Update default port if switching DB engine (see note above)
+        vault_db_port:     "{{ vault_secrets.data.db_port | default('5432') }}"
+        vault_db_name:     "{{ vault_secrets.data.db_name }}"
+        vault_db_user:     "{{ vault_secrets.data.db_user }}"
+        vault_db_password: "{{ vault_secrets.data.db_password }}"
+
+    - name: Pull rollback image from registry
+      # Pulls the specific build-tagged image to roll back to
+      shell: "docker pull {{ image_name }}:{{ rollback_tag }}"
+
+    - name: Update IMAGE_TAG in .env to rollback tag
+      # Ensures docker-compose uses the rollback image on restart
+      lineinfile:
+        path: "{{ deploy_dir }}/.env"
+        regexp: '^IMAGE_TAG='
+        line: "IMAGE_TAG={{ rollback_tag }}"
+
+    - name: Restart containers on rollback image
+      # --remove-orphans cleans up any containers not in compose file
+      shell: |
+        cd {{ deploy_dir }}
+        docker-compose up -d --remove-orphans
+
+    - name: Write rollback audit log
+      # Permanent record of every rollback — tag, host, timestamp, user
+      lineinfile:
+        path: /var/log/app/deployments.log
+        line: "{{ ansible_date_time.iso8601 }} | ROLLBACK | portal | tag={{ rollback_tag }} | host={{ inventory_hostname }} | user={{ ansible_user }}"
+        create: yes
