@@ -40,7 +40,9 @@ audit() {
 log "Starting smoke test — checking application health endpoint..."
 
 for i in $(seq 1 $MAX_RETRIES); do
-    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${APP_HOST}:${APP_PORT}/health)
+    # || echo "000" prevents set -e from exiting on connection failure
+    # allowing the retry loop to handle it gracefully
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${APP_HOST}:${APP_PORT}/health || echo "000")
 
     if [ "${HTTP_STATUS}" == "200" ]; then
         audit "SMOKE-TEST-APP-PASS" "Application health check passed — HTTP ${HTTP_STATUS}"

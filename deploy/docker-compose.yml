@@ -62,7 +62,9 @@ services:
       # Update this command to match your DB engine
       # MySQL:  mysqladmin ping -h localhost
       # MSSQL:  /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P ${SA_PASSWORD} -Q "SELECT 1"
-      test: ["CMD-SHELL", "pg_isready -U ${VAULT_DB_USER}"]
+      # $$POSTGRES_USER passes the variable to the container shell at runtime
+      # Single $ would be substituted by Docker Compose at parse time (incorrectly empty)
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 30s
       timeout: 10s
       retries: 3
