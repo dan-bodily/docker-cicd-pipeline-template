@@ -41,6 +41,7 @@ on-premises infrastructure or cloud VMs. No Kubernetes required.
 
 ## Pipeline Stages
 
+![Pipeline Diagram](docs/pipeline-diagram.svg)
 ```
 Source repo → Build image → Push to registry → Deploy → Smoke test → Notify / Rollback
 ```
