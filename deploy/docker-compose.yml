@@ -1,0 +1,77 @@
+version: '3.8'
+
+# Docker Compose service definitions for application stack
+# Secrets are injected at deploy time by Ansible from HashiCorp Vault
+# Never store real credentials in this file
+
+services:
+
+  portal:
+    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    container_name: portal
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection — values injected by Ansible from Vault
+      - DB_HOST=${VAULT_DB_HOST}
+      - DB_PORT=${VAULT_DB_PORT}
+      - DB_NAME=${VAULT_DB_NAME}
+      - DB_USER=${VAULT_DB_USER}
+      - DB_PASSWORD=${VAULT_DB_PASSWORD}
+      # Application environment
+      - APP_ENV=${APP_ENV}
+      - APP_PORT=8080
+    networks:
+      - app-network
+    healthcheck:
+      # Health endpoint checked every 30s — drives smoke test and rollback decision
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  db:
+    # NOTE: PostgreSQL is used here as the default example
+    # Replace with your database of choice:
+    #   MySQL/MariaDB  → image: mysql:8 or mariadb:10
+    #   MSSQL          → image: mcr.microsoft.com/mssql/server:2022-latest
+    #   Oracle         → image: container-registry.oracle.com/database/express:latest
+    # Update environment variables and healthcheck command to match your DB engine
+    image: postgres:15
+    container_name: db
+    restart: unless-stopped
+    environment:
+      # Database credentials — injected by Ansible from Vault
+      # Update variable names to match your DB engine's requirements
+      - POSTGRES_DB=${VAULT_DB_NAME}
+      - POSTGRES_USER=${VAULT_DB_USER}
+      - POSTGRES_PASSWORD=${VAULT_DB_PASSWORD}
+    volumes:
+      # Persistent volume — survives container restarts
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      # Update this command to match your DB engine
+      # MySQL:  mysqladmin ping -h localhost
+      # MSSQL:  /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P ${SA_PASSWORD} -Q "SELECT 1"
+      test: ["CMD-SHELL", "pg_isready -U ${VAULT_DB_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  # Named volume for database persistence
+  db-data:
+    driver: local
