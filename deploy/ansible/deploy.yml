@@ -1,0 +1,81 @@
+---
+# deploy.yml — Ansible playbook for application deployment
+# Pulls secrets from HashiCorp Vault, populates .env, and restarts containers
+#
+# DB ENGINE NOTE: If you change the database engine from PostgreSQL
+# update the vault_db_port default value and any DB-specific variables
+# below to match your engine:
+#   MySQL/MariaDB  → default port 3306
+#   MSSQL          → default port 1433
+#   Oracle         → default port 1521
+# Also update docker-compose.yml, docker-compose.env.template, and smoke-test.sh
+
+- name: Deploy application
+  hosts: docker_hosts
+  become: yes
+
+  vars:
+    deploy_dir: "/opt/company/app"
+    image_name: "registry.company.internal/portal"
+    # image_tag passed in from Jenkins as an extra variable
+    image_tag: "{{ image_tag }}"
+
+  tasks:
+
+    - name: Authenticate with HashiCorp Vault
+      # AppRole auth — credentials stored in Jenkins, never on disk
+      community.hashi_vault.vault_login:
+        url: "https://vault.company.internal"
+        auth_method: approle
+        role_id: "{{ vault_role_id }}"
+        secret_id: "{{ vault_secret_id }}"
+      register: vault_login
+
+    - name: Pull database credentials from Vault
+      # Update secret path to match your Vault KV structure
+      # Update variable names if switching DB engine (see note above)
+      community.hashi_vault.vault_kv2_get:
+        url: "https://vault.company.internal"
+        path: "company/prod/app/db"
+        auth_method: token
+        token: "{{ vault_login.login.auth.client_token }}"
+      register: vault_secrets
+
+    - name: Populate .env file from Vault secrets
+      # Writes secrets to .env at deploy time — file is never committed to source control
+      # Update variable names below if switching DB engine (see note above)
+      template:
+        src: ../docker-compose.env.template
+        dest: "{{ deploy_dir }}/.env"
+        owner: root
+        group: root
+        mode: '0600'
+      vars:
+        vault_db_host:     "{{ vault_secrets.data.db_host }}"
+        # Update default port if switching DB engine (see note above)
+        vault_db_port:     "{{ vault_secrets.data.db_port | default('5432') }}"
+        vault_db_name:     "{{ vault_secrets.data.db_name }}"
+        vault_db_user:     "{{ vault_secrets.data.db_user }}"
+        vault_db_password: "{{ vault_secrets.data.db_password }}"
+
+    - name: Copy docker-compose.yml to deploy directory
+      copy:
+        src: ../docker-compose.yml
+        dest: "{{ deploy_dir }}/docker-compose.yml"
+
+    - name: Pull new Docker image from registry
+      # Pulls the specific build-tagged image pushed by Jenkins
+      shell: "docker pull {{ image_name }}:{{ image_tag }}"
+
+    - name: Restart containers with new image
+      # --remove-orphans cleans up any containers not defined in compose file
+      shell: |
+        cd {{ deploy_dir }}
+        docker-compose up -d --remove-orphans
+
+    - name: Write deploy audit log
+      # Permanent record of every deploy — image tag, host, timestamp, user
+      lineinfile:
+        path: /var/log/app/deployments.log
+        line: "{{ ansible_date_time.iso8601 }} | portal | tag={{ image_tag }} | host={{ inventory_hostname }} | user={{ ansible_user }}"
+        create: yes
