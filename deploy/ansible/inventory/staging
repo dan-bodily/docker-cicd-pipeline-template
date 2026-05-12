@@ -1,0 +1,20 @@
+# staging — Ansible inventory for staging environment
+# Mirrors prod inventory structure — update hosts accordingly
+# Use hostnames or IP addresses resolvable from your Ansible control node
+#
+# Example formats:
+#   docker-staging-01.company.internal
+#   192.168.1.20
+#   docker-staging-01.company.internal ansible_user=deploy ansible_port=22
+
+[docker_hosts]
+# Add staging Docker host(s) here
+# docker-staging-01.company.internal
+
+[docker_hosts:vars]
+# SSH user for Ansible to connect with
+ansible_user=deploy
+# Python interpreter path — update if your hosts use a different path
+ansible_python_interpreter=/usr/bin/python3
+# Environment tag — used in audit logging
+app_env=staging

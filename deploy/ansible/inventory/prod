@@ -1,0 +1,21 @@
+# prod — Ansible inventory for production environment
+# List production Docker hosts below under [docker_hosts]
+# Use hostnames or IP addresses resolvable from your Ansible control node
+#
+# Example formats:
+#   docker-host-01.company.internal
+#   192.168.1.10
+#   docker-host-01.company.internal ansible_user=deploy ansible_port=22
+
+[docker_hosts]
+# Add production Docker host(s) here
+# docker-host-01.company.internal
+# docker-host-02.company.internal
+
+[docker_hosts:vars]
+# SSH user for Ansible to connect with
+ansible_user=deploy
+# Python interpreter path — update if your hosts use a different path
+ansible_python_interpreter=/usr/bin/python3
+# Environment tag — used in audit logging
+app_env=production
